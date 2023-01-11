@@ -28,10 +28,11 @@ public struct ReeeederView: View {
     @State private var titleFromFallbackWebView: String?
 
     public var body: some View {
-        Color(options.theme.background)
-            .overlay(content)
-            .edgesIgnoringSafeArea(.all)
-            .overlay(loader)
+        ZStack {
+            Color(options.theme.background)
+            content
+            loader
+        }
             .navigationTitle(title ?? url.hostWithoutWWW)
         #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
