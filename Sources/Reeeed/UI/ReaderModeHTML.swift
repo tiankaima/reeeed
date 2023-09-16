@@ -1,8 +1,9 @@
 import Foundation
 import SwiftSoup
+import Fuzi
 
 extension Reeeed {
-    public static func wrapHTMLInReaderStyling(html: String, title: String, baseURL: URL?, author: String?, heroImage: URL?, includeExitReaderButton: Bool = true, theme: ReaderTheme = .init()) -> String {
+    public static func wrapHTMLInReaderStyling(html: String, title: String, baseURL: URL?, author: String?, heroImage: URL?, includeExitReaderButton: Bool = true, theme: ReaderTheme = .init(), date: Date? = nil) -> String {
         let escapedTitle = Entities.escape(title.byStrippingSiteNameFromPageTitle)
         let logger = Reeeed.logger
 
@@ -15,9 +16,7 @@ extension Reeeed {
         let heroHTML: String = {
             if let heroImage = heroImage {
                 do {
-                    let firstImageIndex = try numberOfElementsUntilFirstImage(
-                        tags: Set(["p", "h1", "h2", "ul", "ol", "table"]),
-                        html: html)
+                    let firstImageIndex = try estimateLinesUntilFirstImage(html: html)
                     logger.info("First image index: \(firstImageIndex ?? 999)")
                     // If there is no image in the first 10 elements, insert the hero image:
                     if (firstImageIndex ?? 999) > 10 {
@@ -33,20 +32,40 @@ extension Reeeed {
         }()
 
         let subtitle: String = {
-            var parts = [String]()
-            if let author = author {
-                parts.append(author)
+            var partsHTML = [String]()
+
+            let separatorHTML = "<span class='__separator'> · </span>"
+            func appendSeparatorIfNecessary() {
+                if partsHTML.count > 0 {
+                    partsHTML.append(separatorHTML)
+                }
             }
-            if let url = baseURL {
-                parts.append(url.hostWithoutWWW)
+            if let author {
+                partsHTML.append(Entities.escape(author))
             }
-            if parts.count == 0 {
-                return ""
+            if let date {
+                appendSeparatorIfNecessary()
+                partsHTML.append(DateFormatter.shortDateOnly.string(from: date))
             }
-            let text = parts.joined(separator: " • ")
-            let textEscaped = Entities.escape(text)
-            return "<p class='__subtitle'>\(textEscaped)</p>"
+            if let host = baseURL?.hostWithoutWWW {
+                appendSeparatorIfNecessary()
+                partsHTML.append(host)
+            }
+            if partsHTML.count == 0 { return "" }
+            return "<p class='__subtitle'>\(partsHTML.joined())</p>"
         }()
+
+//        let siteLine: String = {
+//            if let url = baseURL {
+//                var partsHTML = [String]()
+//                if let icon = url.googleFaviconURL {
+//                    partsHTML.append("<img class='__icon' src=\"\(Entities.escape(icon.absoluteString))\" />")
+//                }
+//                partsHTML.append(url.hostWithoutWWW)
+//                return "<div class='__site'>" + partsHTML.joined() + "</div>"
+//            }
+//            return ""
+//        }()
 
         let exitReaderButton: String
         if includeExitReaderButton {
@@ -86,14 +105,18 @@ body {
 #__content {
     line-height: 1.5;
     font-size: 1.1em;
+    overflow-x: hidden;
 }
 
 @media screen and (min-width: 650px) {
     #__content { font-size: 1.35em; line-height: 1.5; }
 }
 
-h1 {
+h1, h2, h3, h4, h5, h6 {
+    line-height: 1.2;
+    font-family: -apple-system;
     font-size: 1.5em;
+    font-weight: 800;
 }
 
 img, iframe, object, video {
@@ -128,10 +151,24 @@ figcaption, cite {
 }
 
 .__subtitle {
-    opacity: 0.5;
-    font-size: small;
-    text-transform: uppercase;
     font-weight: bold;
+    vertical-align: baseline;
+    opacity: 0.5;
+}
+
+.__subtitle .__icon {
+    width: 1.2em;
+    height: 1.2em;
+    object-fit: cover;
+    overflow: hidden;
+    border-radius: 3px;
+    margin-right: 0.3em;
+    position: relative;
+    top: 0.3em;
+}
+
+.__subtitle .__separator {
+    opacity: 0.5;
 }
 
 #__content {
@@ -191,6 +228,7 @@ figcaption, cite {
 <body>
 <div id='__content' style='opacity: 0'>
     \(heroHTML)
+    
     <h1>\(escapedTitle)</h1>
         \(subtitle)
         \(html)
@@ -217,43 +255,92 @@ public extension URL {
     static let exitReaderModeLink = URL(string: "feeeed://exit-reader-mode")!
 }
 
-private func numberOfElementsUntilFirstImage(tags: Set<String>, html: String) throws -> Int? {
-    var elCount = 0
-    var firstImageIndex: Int? = nil
+extension URL {
+    var googleFaviconURL: URL? {
+        if let host {
+            return URL(string: "https://www.google.com/s2/favicons?domain=\(host)&sz=64")
+        }
+        return nil
+    }
+}
 
-    let soup = try SwiftSoup.parse(html)
-    try soup.traverseElements { element in
-        let tagName = element.tagName()
-        if tagName == "img", firstImageIndex == nil {
-            firstImageIndex = elCount
-        } else if tags.contains(tagName) {
-            elCount += 1
+private func estimateLinesUntilFirstImage(html: String) throws -> Int? {
+    let doc = try HTMLDocument(data: html.data(using: .utf8)!)
+    var lines = 0
+    var linesBeforeFirst: Int?
+    try doc.root?.traverse { el in
+        if el.tag?.lowercased() == "img", linesBeforeFirst == nil {
+            linesBeforeFirst = lines
+        }
+        lines += el.estLineCount
+    }
+    return linesBeforeFirst
+
+//    var lines = 0
+//
+//    let soup = try SwiftSoup.parse(html)
+//    try soup.traverseElements { element in
+//        let tagName = element.tagName()
+//        if tagName == "img" {
+//            return lines
+//        } else if tags.contains(tagName) {
+//            elCount += 1
+//        }
+//    }
+//
+//    return firstImageIndex
+}
+
+extension Fuzi.XMLElement {
+    func traverse(_ block: (Fuzi.XMLElement) -> Void) throws {
+        for child in children {
+            block(child)
+            try child.traverse(block)
         }
     }
-
-    return firstImageIndex
-}
-
-extension SwiftSoup.Node {
-    func traverseElements(_ block: @escaping (Element) -> Void) throws {
-        let visitor = BlockNodeVisitor(headCallback: { (node, _depth) in
-            if let el = node as? Element {
-                block(el)
+    var estLineCount: Int {
+        if let tag = self.tag?.lowercased() {
+            switch tag {
+            case "video", "embed": return 5
+            case "h1", "h2", "h3", "h4", "h5", "h6", "p", "li":
+                return Int(ceil(Double(stringValue.count) / 60)) + 1
+            case "tr": return 1
+            default: return 0
             }
-        }, tailCallback: nil)
-        try traverse(visitor)
+        }
+        return 0
     }
 }
 
-private struct BlockNodeVisitor: NodeVisitor {
-    var headCallback: ((Node, Int) -> Void)?
-    var tailCallback: ((Node, Int) -> Void)?
-
-    func head(_ node: Node, _ depth: Int) throws {
-        headCallback?(node, depth)
-    }
-
-    func tail(_ node: Node, _ depth: Int) throws {
-        tailCallback?(node, depth)
-    }
+extension DateFormatter {
+    static let shortDateOnly: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .none
+        return formatter
+    }()
 }
+
+//extension SwiftSoup.Node {
+//    func traverseElements(_ block: @escaping (Element) -> Void) throws {
+//        let visitor = BlockNodeVisitor(headCallback: { (node, _depth) in
+//            if let el = node as? Element {
+//                block(el)
+//            }
+//        }, tailCallback: nil)
+//        try traverse(visitor)
+//    }
+//}
+//
+//private struct BlockNodeVisitor: NodeVisitor {
+//    var headCallback: ((Node, Int) -> Void)?
+//    var tailCallback: ((Node, Int) -> Void)?
+//
+//    func head(_ node: Node, _ depth: Int) throws {
+//        headCallback?(node, depth)
+//    }
+//
+//    func tail(_ node: Node, _ depth: Int) throws {
+//        tailCallback?(node, depth)
+//    }
+//}
