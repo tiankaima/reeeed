@@ -3,9 +3,11 @@ import SwiftUI
 public struct ReeeederViewOptions {
     public var theme: ReaderTheme
     public var onLinkClicked: ((URL) -> Void)?
-    public init(theme: ReaderTheme = .init(), onLinkClicked: ((URL) -> Void)? = nil) {
+    public var includeExitReaderButton: Bool = true
+    public init(theme: ReaderTheme = .init(), onLinkClicked: ((URL) -> Void)? = nil, includeExitReaderButton: Bool = true) {
         self.theme = theme
         self.onLinkClicked = onLinkClicked
+        self.includeExitReaderButton = includeExitReaderButton
     }
 }
 
@@ -39,7 +41,7 @@ public struct ReeeederView: View {
             .task {
                 do {
                     let result = try await Reeeed.fetchAndExtractContent(fromURL: url)
-                    let html = result.html(includeExitReaderButton: true, theme: options.theme)
+                    let html = result.html(includeExitReaderButton: options.includeExitReaderButton, theme: options.theme)
                     self.status = .extractedContent(html: html, baseURL: result.url, title: result.title)
                 } catch {
                     status = .failedToExtractContent
