@@ -12,12 +12,15 @@ public struct ReeeederViewOptions {
 }
 
 public struct ReeeederView: View {
+    @Binding var useReeeder: Bool
+    
     var url: URL
     var options: ReeeederViewOptions
 
-    public init(url: URL, options: ReeeederViewOptions = .init()) {
+    public init(url: URL, options: ReeeederViewOptions = .init(), useReeeder: Binding<Bool> = .constant(true)) {
         self.url = url
         self.options = options
+        self._useReeeder = useReeeder
     }
 
     // MARK: - Implementation
@@ -45,6 +48,7 @@ public struct ReeeederView: View {
                     self.status = .extractedContent(html: html, baseURL: result.url, title: result.title)
                 } catch {
                     status = .failedToExtractContent
+                    useReeeder = false
                 }
             }
         // TODO: Respond to dynamic theme changes
